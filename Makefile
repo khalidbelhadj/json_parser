@@ -1,12 +1,15 @@
 CC = clang
 CFLAGS = -Wall -Wextra -Werror
-FILES = src/main.c src/tokeniser.c src/parser.c src/utils.c
+SRC_DIR=src
+BUILD_DIR=build
+SRC_FILES=$(wildcard $(SRC_DIR)/*.c)
+OBJ_FILES=$(patsubst $(SRC_DIR)/%.c, $(BUILD_DIR)/%.o, $(SRC_FILES))
 
-build:
-	$(CC) $(CFLAGS) $(FILES) -o bin/main
+$(BUILD_DIR)/%.o: $(SRC_DIR)/%.c
+	$(CC) $(CFLAGS) -c -o $@ $<
 
-run: build
-	./bin/main
+build/libjson.a: $(OBJ_FILES)
+	ar -rcs $@ $^
 
 clean:
-	rm -rf bin main.dSYM
+	rm -rf build/*
