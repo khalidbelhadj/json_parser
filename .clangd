@@ -2,3 +2,4 @@ CompileFlags:
     Add:
         - "Wall"
         - "Wextra"
+        - "-I../src/"

@@ -1,6 +1,6 @@
-#include "utils.h"
-#include "tokeniser.h"
 #include "parser.h"
+#include "tokeniser.h"
+#include "utils.h"
 
 JSONElement *json_object_get(JSONObject *object, char *key) {
     for (size_t i = 0; i < object->pair_count; i++) {
@@ -32,11 +32,10 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    JSONTokeniser *tokeniser = tokenise(content);
+    JSONElement *json = parse(content);
     free(content);
 
-    JSONParser *parser = parse(tokeniser);
-    print_element(parser->root, 0);
-
+    printf("%s\n", stringify(json));
+    free_element(json);
     return 0;
 }

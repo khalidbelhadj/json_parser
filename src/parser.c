@@ -1,5 +1,107 @@
 #include "parser.h"
 #include "tokeniser.h"
+#include <stdio.h>
+#include <string.h>
+
+JSONElement *parse(char *content) {
+    JSONTokeniser *tokeniser = tokenise(content);
+    JSONParser *parser = new_parser(tokeniser);
+    free(tokeniser);
+    return &parser->root;
+}
+
+char *stringify(JSONElement *element) {
+    switch (element->type) {
+    case JSON_ELEMENT_OBJECT: {
+        size_t length = 1;
+        for (size_t i = 0; i < element->element.object->pair_count; ++i) {
+            length += strlen(element->element.object->pairs[i].key) + 4;
+            length += strlen(stringify(&element->element.object->pairs[i].value));
+            if (i != element->element.object->pair_count - 1) {
+                length += 2;
+            }
+        }
+        char *buffer = calloc(1, length);
+        strcat(buffer, "{");
+        for (size_t i = 0; i < element->element.object->pair_count; ++i) {
+            strcat(buffer, "\"");
+            strcat(buffer, element->element.object->pairs[i].key);
+            strcat(buffer, "\"");
+            strcat(buffer, ": ");
+            strcat(buffer, stringify(&element->element.object->pairs[i].value));
+            if (i != element->element.object->pair_count - 1) {
+                strcat(buffer, ", ");
+            }
+        }
+        strcat(buffer, "}");
+        return buffer;
+    }
+    case JSON_ELEMENT_ARRAY: {
+        size_t length = 1;
+        for (size_t i = 0; i < element->element.array->element_count; ++i) {
+            length += strlen(stringify(&element->element.array->elements[i]));
+            if (i != element->element.array->element_count - 1) {
+                length += 2;
+            }
+        }
+        char *buffer = calloc(1, length);
+        strcat(buffer, "[");
+        for (size_t i = 0; i < element->element.array->element_count; ++i) {
+            strcat(buffer, stringify(&element->element.array->elements[i]));
+            if (i != element->element.array->element_count - 1) {
+                strcat(buffer, ", ");
+            }
+        }
+        strcat(buffer, "]");
+        return buffer;
+    }
+    case JSON_ELEMENT_VALUE:
+        switch (element->element.value.type) {
+        case JSON_VALUE_STRING: {
+            size_t length = strlen(element->element.value.value.string) + 3;
+            char *buffer = calloc(1, length);
+            snprintf(buffer, length, "\"%s\"",
+                     element->element.value.value.string);
+            return buffer;
+        }
+        case JSON_VALUE_NUMBER_INT: {
+            char *buffer = calloc(1, 100);
+            snprintf(buffer, sizeof(buffer), "%llu",
+                     element->element.value.value.number_int);
+            return strdup(buffer);
+        }
+        case JSON_VALUE_NUMBER_FLOAT: {
+            char *buffer = calloc(1, 100);
+            snprintf(buffer, sizeof(buffer), "%Lf",
+                     element->element.value.value.number_float);
+            return strdup(buffer);
+        }
+        case JSON_VALUE_BOOLEAN:
+            if (element->element.value.value.boolean) {
+                return "true";
+            }
+            return "false";
+        case JSON_VALUE_NULL:
+            return "null";
+        }
+        break;
+    case JSON_ELEMENT_END:
+        return "";
+    }
+    return NULL;
+}
+
+JSONParser *new_parser(JSONTokeniser *t) {
+    JSONParser *p = calloc(1, sizeof(JSONParser));
+    *p = (JSONParser){
+        .tokens = t->tokens,
+        .token_count = t->token_count,
+        .current_token = 0,
+    };
+
+    p->root = parse_element(p);
+    return p;
+}
 
 JSONElement parse_string(JSONParser *p) {
     JSONToken token = p->tokens[p->current_token];
@@ -78,8 +180,6 @@ JSONElement parse_null(JSONParser *p) {
     return element;
 }
 
-JSONElement parse_element(JSONParser *p);
-
 JSONObject *parse_object(JSONParser *p) {
     size_t max = 100;
     JSONObject *object = calloc(1, sizeof(JSONObject));
@@ -98,7 +198,9 @@ JSONObject *parse_object(JSONParser *p) {
     while (p->tokens[p->current_token].type != RIGHT_CURLY) {
         JSONToken key = p->tokens[p->current_token];
         if (key.type != STRING) {
-            fprintf(stderr, "Expected string, got %s, line: %d, token number: %zu\n", token_names[key.type], __LINE__, p->current_token);
+            fprintf(stderr,
+                    "Expected string, got %s, line: %d, token number: %zu\n",
+                    token_names[key.type], __LINE__, p->current_token);
             exit(1);
         }
         p->current_token++;
@@ -220,40 +322,25 @@ JSONElement parse_element(JSONParser *p) {
     }
 }
 
-JSONParser *parse(JSONTokeniser *t) {
-    JSONParser *p = calloc(1, sizeof(JSONParser));
-    *p = (JSONParser){
-        .tokens = t->tokens,
-        .token_count = t->token_count,
-        .current_token = 0,
-    };
-
-    p->root = parse_element(p);
-    return p;
-}
-
-void free_parser(JSONParser *p) {
-    free(p->tokens);
-    free(p);
-}
-
-void print_element(JSONElement element, int indent) {
-    switch (element.type) {
+void print_element(JSONElement *element, int indent) {
+    switch (element->type) {
     case JSON_ELEMENT_VALUE:
-        switch (element.element.value.type) {
+        switch (element->element.value.type) {
         case JSON_VALUE_STRING:
             printf("%*c\"%s\"\n", indent, ' ',
-                   element.element.value.value.string);
+                   element->element.value.value.string);
             break;
         case JSON_VALUE_NUMBER_INT:
-            printf("%*c%llu\n", indent, ' ', element.element.value.value.number_int);
+            printf("%*c%llu\n", indent, ' ',
+                   element->element.value.value.number_int);
             break;
         case JSON_VALUE_NUMBER_FLOAT:
-            printf("%*c%Lf\n", indent, ' ', element.element.value.value.number_float);
+            printf("%*c%Lf\n", indent, ' ',
+                   element->element.value.value.number_float);
             break;
         case JSON_VALUE_BOOLEAN:
             printf("%*c%s\n", indent, ' ',
-                   element.element.value.value.boolean ? "true" : "false");
+                   element->element.value.value.boolean ? "true" : "false");
             break;
         case JSON_VALUE_NULL:
             printf("%*cnull\n", indent, ' ');
@@ -261,19 +348,48 @@ void print_element(JSONElement element, int indent) {
         }
         break;
     case JSON_ELEMENT_ARRAY:
-        for (size_t i = 0; i < element.element.array->element_count; ++i) {
-            print_element(element.element.array->elements[i], indent);
+        printf("%*c[\n", indent, ' ');
+        for (size_t i = 0; i < element->element.array->element_count; ++i) {
+            print_element(&element->element.array->elements[i], indent + 4);
         }
+        printf("%*c[\n", indent, ' ');
         break;
     case JSON_ELEMENT_OBJECT:
-        for (size_t i = 0; i < element.element.object->pair_count; ++i) {
+        for (size_t i = 0; i < element->element.object->pair_count; ++i) {
             printf("%*c%s:\n", indent, ' ',
-                   element.element.object->pairs[i].key);
-            print_element(element.element.object->pairs[i].value, indent + 4);
+                   element->element.object->pairs[i].key);
+            print_element(&element->element.object->pairs[i].value, indent + 4);
         }
         break;
     case JSON_ELEMENT_END:
         printf("End of JSON\n");
+        break;
+    }
+}
+
+void free_element(JSONElement *element) {
+    switch (element->type) {
+    case JSON_ELEMENT_VALUE:
+        if (element->element.value.type == JSON_VALUE_STRING) {
+            free(element->element.value.value.string);
+        }
+        break;
+    case JSON_ELEMENT_ARRAY:
+        for (size_t i = 0; i < element->element.array->element_count; ++i) {
+            free_element(&element->element.array->elements[i]);
+        }
+        free(element->element.array->elements);
+        free(element->element.array);
+        break;
+    case JSON_ELEMENT_OBJECT:
+        for (size_t i = 0; i < element->element.object->pair_count; ++i) {
+            free(element->element.object->pairs[i].key);
+            free_element(&element->element.object->pairs[i].value);
+        }
+        free(element->element.object->pairs);
+        free(element->element.object);
+        break;
+    case JSON_ELEMENT_END:
         break;
     }
 }

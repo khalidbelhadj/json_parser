@@ -75,12 +75,15 @@ typedef struct {
     size_t current_token;
 } JSONParser;
 
-JSONElement parse_string(JSONParser *p);
-JSONElement parse_true(JSONParser *p);
-JSONElement parse_false(JSONParser *p);
-JSONElement parse_null(JSONParser *p);
-struct JSONObject *parse_object(JSONParser *p);
-JSONArray *parse_array(JSONParser *p);
-JSONElement parse_element(JSONParser *p);
-JSONParser *parse(JSONTokeniser *t);
-void print_element(JSONElement element, int indent);
+JSONElement* parse         (char *content);
+char*        stringify     (JSONElement *element);
+JSONParser*  new_parser    (JSONTokeniser *t);
+JSONElement  parse_string  (JSONParser *p);
+JSONElement  parse_true    (JSONParser *p);
+JSONElement  parse_false   (JSONParser *p);
+JSONElement  parse_null    (JSONParser *p);
+JSONObject*  parse_object  (JSONParser *p);
+JSONArray*   parse_array   (JSONParser *p);
+JSONElement  parse_element (JSONParser *p);
+void         print_element (JSONElement *element, int indent);
+void         free_element  (JSONElement *element);
