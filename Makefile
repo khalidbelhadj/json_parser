@@ -11,5 +11,8 @@ $(BUILD_DIR)/%.o: $(SRC_DIR)/%.c
 build/libjson.a: $(OBJ_FILES)
 	ar -rcs $@ $^
 
+fmt:
+	clang-format -i */**.c */**.h
+
 clean:
 	rm -rf build/*

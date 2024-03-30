@@ -23,6 +23,4 @@ bool is_whitespace(char c) {
     return c == ' ' || c == '\t' || c == '\n' || c == '\r';
 }
 
-bool is_digit(char c) {
-    return c >= '0' && c <= '9';
-}
+bool is_digit(char c) { return c >= '0' && c <= '9'; }
