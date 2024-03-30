@@ -16,12 +16,13 @@ char *stringify(JSONElement *element) {
         size_t length = 1;
         for (size_t i = 0; i < element->element.object->pair_count; ++i) {
             length += strlen(element->element.object->pairs[i].key) + 4;
-            length += strlen(stringify(&element->element.object->pairs[i].value));
+            length +=
+                strlen(stringify(&element->element.object->pairs[i].value));
             if (i != element->element.object->pair_count - 1) {
                 length += 2;
             }
         }
-        char *buffer = calloc(1, length);
+        char *buffer = calloc(1, sizeof(char) * length);
         strcat(buffer, "{");
         for (size_t i = 0; i < element->element.object->pair_count; ++i) {
             strcat(buffer, "\"");
@@ -44,7 +45,7 @@ char *stringify(JSONElement *element) {
                 length += 2;
             }
         }
-        char *buffer = calloc(1, length);
+        char *buffer = calloc(1, sizeof(char) * length);
         strcat(buffer, "[");
         for (size_t i = 0; i < element->element.array->element_count; ++i) {
             strcat(buffer, stringify(&element->element.array->elements[i]));
@@ -59,20 +60,20 @@ char *stringify(JSONElement *element) {
         switch (element->element.value.type) {
         case JSON_VALUE_STRING: {
             size_t length = strlen(element->element.value.value.string) + 3;
-            char *buffer = calloc(1, length);
+            char *buffer = calloc(1, sizeof(char) * length);
             snprintf(buffer, length, "\"%s\"",
                      element->element.value.value.string);
             return buffer;
         }
         case JSON_VALUE_NUMBER_INT: {
-            char *buffer = calloc(1, 100);
-            snprintf(buffer, sizeof(buffer), "%llu",
+            char *buffer = calloc(1, sizeof(char) * 101);
+            snprintf(buffer, 100, "%llu",
                      element->element.value.value.number_int);
             return strdup(buffer);
         }
         case JSON_VALUE_NUMBER_FLOAT: {
-            char *buffer = calloc(1, 100);
-            snprintf(buffer, sizeof(buffer), "%Lf",
+            char *buffer = calloc(1, sizeof(char) * 100);
+            snprintf(buffer, 100, "%Lf",
                      element->element.value.value.number_float);
             return strdup(buffer);
         }
