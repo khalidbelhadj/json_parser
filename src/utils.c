@@ -1,4 +1,4 @@
-#include "utils.h"
+#include "../include/utils.h"
 
 char *read_file_content(const char *file_name) {
 

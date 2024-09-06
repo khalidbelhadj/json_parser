@@ -1,0 +1,50 @@
+[
+  {
+    "arguments": [
+      "/usr/bin/clang",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-g",
+      "-c",
+      "-o",
+      "build/parser.o",
+      "src/parser.c"
+    ],
+    "directory": "/Users/khalid/Desktop/json_parser",
+    "file": "/Users/khalid/Desktop/json_parser/src/parser.c",
+    "output": "/Users/khalid/Desktop/json_parser/build/parser.o"
+  },
+  {
+    "arguments": [
+      "/usr/bin/clang",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-g",
+      "-c",
+      "-o",
+      "build/tokeniser.o",
+      "src/tokeniser.c"
+    ],
+    "directory": "/Users/khalid/Desktop/json_parser",
+    "file": "/Users/khalid/Desktop/json_parser/src/tokeniser.c",
+    "output": "/Users/khalid/Desktop/json_parser/build/tokeniser.o"
+  },
+  {
+    "arguments": [
+      "/usr/bin/clang",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-g",
+      "-c",
+      "-o",
+      "build/utils.o",
+      "src/utils.c"
+    ],
+    "directory": "/Users/khalid/Desktop/json_parser",
+    "file": "/Users/khalid/Desktop/json_parser/src/utils.c",
+    "output": "/Users/khalid/Desktop/json_parser/build/utils.o"
+  }
+]

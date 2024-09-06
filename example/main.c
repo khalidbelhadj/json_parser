@@ -1,22 +1,22 @@
-#include "parser.h"
-#include "tokeniser.h"
-#include "utils.h"
+#include "../include/parser.h"
+#include "../include/tokeniser.h"
+#include "../include/utils.h"
 
-JSONElement *json_object_get(JSONObject *object, char *key) {
-    for (size_t i = 0; i < object->pair_count; i++) {
-        if (strcmp(object->pairs[i].key, key) == 0) {
-            return &object->pairs[i].value;
-        }
-    }
-    return NULL;
-}
+// JSONElement *json_object_get(JSONObject *object, char *key) {
+//     for (size_t i = 0; i < object->pair_count; i++) {
+//         if (strcmp(object->first[i].key, key) == 0) {
+//             return &object->first[i].value;
+//         }
+//     }
+//     return NULL;
+// }
 
-JSONElement *json_array_get(JSONArray *array, size_t index) {
-    if (index >= array->element_count) {
-        return NULL;
-    }
-    return &array->elements[index];
-}
+// JSONElement *json_array_get(JSONArray *array, size_t index) {
+//     if (index >= array->element_count) {
+//         return NULL;
+//     }
+//     return &array->first[index];
+// }
 
 int main(int argc, char *argv[]) {
     if (argc != 2) {
@@ -25,17 +25,16 @@ int main(int argc, char *argv[]) {
     }
 
     char *file_name = argv[1];
-    char *content = read_file_content(file_name);
 
-    if (content == NULL) {
-        printf("Failed to read file %s\n", file_name);
+    Arena a = {0};
+    int error = 0;
+    JSONElement json = parse_file(&a, file_name, &error);
+    (void) json;
+    if (error != 0) {
         return 1;
     }
-
-    JSONElement *json = parse(content);
-    free(content);
-
-    printf("%s\n", stringify(json));
-    free_element(json);
+    // printf("%s\n", stringify(&a, json));
+    print_element(&json, 4);
+    arena_free(&a);
     return 0;
 }
