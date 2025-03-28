@@ -1,7 +1,6 @@
 #include "../include/utils.h"
 
 char *read_file_content(const char *file_name) {
-
     FILE *file = fopen(file_name, "r");
     if (file == NULL) {
         return NULL;

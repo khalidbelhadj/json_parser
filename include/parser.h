@@ -1,6 +1,9 @@
 #pragma once
 
-#include "tokeniser.h"
+#include "tokenizer.h"
+
+#define JSON_MAX_DEPTH 1024
+#define JSON_MAX_ELEMENTS 1000000
 
 // ----------
 // JSON Value
@@ -15,12 +18,7 @@ typedef enum {
 } JSONValuetype;
 
 static const char *value_type_names[] = {
-    [0] = "string",
-    [1] = "int",
-    [2] = "float",
-    [3] = "boolean",
-    [4] = "null"
-};
+    [0] = "string", [1] = "int", [2] = "float", [3] = "boolean", [4] = "null"};
 
 typedef struct {
     JSONValuetype type;
@@ -44,11 +42,7 @@ typedef enum {
 } JSONElementType;
 
 static const char *element_type_names[] = {
-    [0] = "object",
-    [1] = "array",
-    [2] = "value",
-    [3] = "end of file"
-};
+    [0] = "object", [1] = "array", [2] = "value", [3] = "end of file"};
 
 struct JSONObject;
 struct JSONArray;
@@ -66,23 +60,37 @@ typedef struct {
 // JSON Array
 // ----------
 
+#define for_each_element(arr, elem_var)                              \
+    for (JSONArrayElement *elem_var = (arr)->head; elem_var != NULL; \
+         elem_var = elem_var->next)
+
+typedef struct JSONArrayElement {
+    JSONElement element;
+    struct JSONArrayElement *next;
+} JSONArrayElement;
+
 typedef struct JSONArray {
-    JSONElement *elements;
-    size_t elements_count;
+    JSONArrayElement *head;
+    JSONArrayElement *tail;
 } JSONArray;
 
 // -----------
 // JSON Object
 // -----------
 
+#define for_each_pair(obj, pair_var)                         \
+    for (JSONPair *pair_var = (obj)->head; pair_var != NULL; \
+         pair_var = pair_var->next)
+
 typedef struct JSONPair {
     char *key;
     JSONElement value;
+    struct JSONPair *next;
 } JSONPair;
 
 typedef struct JSONObject {
-    JSONPair *pairs;
-    size_t pairs_count;
+    JSONPair *head;
+    JSONPair *tail;
 } JSONObject;
 
 // -----------
@@ -95,19 +103,15 @@ typedef struct {
     size_t token_count;
     size_t current_token;
     const char *file_name;
+    size_t current_depth;
 } JSONParser;
 
-JSONElement parse(Arena *a, char *content, int *error);
-JSONElement parse_file(Arena *a, const char *file_name, int *error);
-JSONElement parse_element(Arena *a, JSONParser *p, int *error);
-JSONArray *parse_array(Arena *a, JSONParser *p, int *error);
-JSONObject *parse_object(Arena *a, JSONParser *p, int *error);
-JSONElement parse_string(JSONParser *p, int *error);
-JSONElement parse_number(JSONParser *p, int *error);
-JSONElement parse_true(JSONParser *p, int *error);
-JSONElement parse_false(JSONParser *p, int *error);
-JSONElement parse_null(JSONParser *p, int *error);
+JSONElement json_parse(Arena *a, char *content, int *error);
+JSONElement json_parse_file(Arena *a, const char *file_name, int *error);
+JSONElement json_parse_element(Arena *a, JSONParser *p, int *error);
+JSONArray *json_parse_array(Arena *a, JSONParser *p, int *error);
+JSONObject *json_parse_object(Arena *a, JSONParser *p, int *error);
+JSONElement json_parse_string(JSONParser *p, int *error);
+JSONElement json_parse_number(JSONParser *p, int *error);
 
-char *stringify(Arena *a, JSONElement element);
-
-void print_element(JSONElement *element, int indent);
+char *json_stringify(Arena *a, JSONElement element);

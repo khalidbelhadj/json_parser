@@ -1,35 +1,62 @@
 #include "../include/parser.h"
-#include "../include/utils.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/resource.h>
+#include <sys/syslimits.h>
 
-#define log_error(p, tok, expected)                          \
-    fprintf(stderr, "%s:%zu:%zu: Expected %s, got %s\n", p->file_name, tok.line,                   \
-            tok.col, token_names[expected], token_names[tok.type])
+#include "../include/utils.h"
+#include "arena.h"
+#include "tokenizer.h"
 
-JSONElement parse_file(Arena *a, const char *file_name, int *error) {
-    char *content = read_file_content(file_name);
-    if (content == NULL) {
+static void json_error_token(JSONParser *p, size_t line, size_t col,
+                             const char *expected, const char *got) {
+    const char *source = p->file_name ? p->file_name : "<string>";
+
+    fprintf(stderr, "%s:%zu:%zu: Expected %s, got %s\n", source, line, col,
+            expected, got);
+}
+
+static void json_error(JSONParser *p, const char *message) {
+    const char *source = p->file_name ? p->file_name : "<string>";
+
+    fprintf(stderr, "%s: %s\n", source, message);
+}
+
+JSONElement json_parse_file(Arena *a, const char *file_name, int *error) {
+    char *path = realpath(file_name, NULL);
+    if (path == NULL) {
         printf("Failed to read file %s\n", file_name);
         *error = 1;
         return (JSONElement){0};
     }
 
-    JSONTokeniser *t = tokenise(a, content);
+    char *content = read_file_content(path);
+    if (content == NULL) {
+        printf("Failed to read file %s\n", file_name);
+        *error = 1;
+        free(path);
+        return (JSONElement){0};
+    }
+
+    JSONTokenizer *t = json_tokenize(a, content, error);
     JSONParser *p = arena_alloc(a, sizeof(JSONParser));
+
     *p = (JSONParser){.tokens = t->tokens,
                       .token_count = t->token_count,
                       .current_token = 0,
-                      .file_name = realpath(file_name, NULL)};
+                      .file_name = path};
 
-    p->root = parse_element(a, p, error);
+    p->root = json_parse_element(a, p, error);
+
+    free(content);
+    free(path);
     return p->root;
 }
 
-JSONElement parse(Arena *a, char *content, int *error) {
-    JSONTokeniser *t = tokenise(a, content);
+JSONElement json_parse(Arena *a, char *content, int *error) {
+    JSONTokenizer *t = json_tokenize(a, content, error);
     JSONParser *p = arena_alloc(a, sizeof(JSONParser));
     *p = (JSONParser){
         .tokens = t->tokens,
@@ -37,72 +64,118 @@ JSONElement parse(Arena *a, char *content, int *error) {
         .current_token = 0,
     };
 
-    p->root = parse_element(a, p, error);
+    p->root = json_parse_element(a, p, error);
     return p->root;
 }
 
-JSONElement parse_element(Arena *a, JSONParser *p, int *error) {
+JSONElement json_parse_element(Arena *a, JSONParser *p, int *error) {
     JSONElement element = {0};
     JSONToken tok = p->tokens[p->current_token];
-    switch (tok.type) {
-    case LEFT_CURLY:
-        element.type = JSON_ELEMENT_OBJECT;
-        element.element.object = parse_object(a, p, error);
-        return element;
-    case LEFT_SQUARE:
-        element.type = JSON_ELEMENT_ARRAY;
-        element.element.array = parse_array(a, p, error);
-        return element;
-    case STRING:
-        return parse_string(p, error);
-    case NUMBER_INT:
-    case NUMBER_FLOAT:
-        return parse_number(p, error);
-    case TRUE:
-        return parse_true(p, error);
-    case FALSE:
-        return parse_false(p, error);
-    case NULL_TOKEN:
-        return parse_null(p, error);
-    default:
-        log_error(p, tok, NULL_TOKEN);
+
+    if (p->current_depth >= JSON_MAX_DEPTH) {
+        json_error(p, "Maximum JSON element depth reached");
         *error = 1;
         return element;
     }
+
+    ++p->current_depth;
+
+    switch (tok.type) {
+        case LEFT_CURLY:
+            element.type = JSON_ELEMENT_OBJECT;
+            element.element.object = json_parse_object(a, p, error);
+            break;
+        case LEFT_SQUARE:
+            element.type = JSON_ELEMENT_ARRAY;
+            element.element.array = json_parse_array(a, p, error);
+            break;
+        case STRING:
+            element = json_parse_string(p, error);
+            break;
+        case NUMBER_INT:
+        case NUMBER_FLOAT:
+            element = json_parse_number(p, error);
+            break;
+        case TRUE:
+            element.type = JSON_ELEMENT_VALUE;
+            element.element.value.type = JSON_VALUE_BOOLEAN;
+            element.element.value.value.boolean = true;
+            p->current_token++;
+            break;
+        case FALSE:
+            element.type = JSON_ELEMENT_VALUE;
+            element.element.value.type = JSON_VALUE_BOOLEAN;
+            element.element.value.value.boolean = false;
+            p->current_token++;
+            break;
+        case NULL_TOKEN:
+            element.type = JSON_ELEMENT_VALUE;
+            element.element.value.type = JSON_VALUE_NULL;
+            p->current_token++;
+            break;
+        default:
+            if (p->file_name) {
+                fprintf(stderr, "%s:%zu:%zu: Expected %s, got %s\n",
+                        p->file_name, tok.line, tok.col, "json element",
+                        token_names[tok.type]);
+            } else {
+                fprintf(stderr, "%zu:%zu: Expected %s, got %s\n", tok.line,
+                        tok.col, "json element", token_names[tok.type]);
+            }
+            *error = 1;
+    }
+
+    --p->current_depth;
+    return element;
 }
 
-JSONArray *parse_array(Arena *a, JSONParser *p, int *error) {
+JSONArray *json_parse_array(Arena *a, JSONParser *p, int *error) {
     JSONArray *array = arena_alloc(a, sizeof(JSONArray));
-
-    Arena tmp = {0};
-    size_t capacity = INIT_CAPACITY;
-    size_t size = 0;
-    JSONElement *elements = arena_alloc(&tmp, sizeof(JSONElement) * capacity);
+    *array = (JSONArray){.head = NULL, .tail = NULL};
 
     // Parse opening square brace
     JSONToken opening = p->tokens[p->current_token];
     ++p->current_token;
     if (opening.type != LEFT_SQUARE) {
-        log_error(p, opening, LEFT_SQUARE);
+        if (p->file_name) {
+            fprintf(stderr, "%s:%zu:%zu: Expected %s, got %s\n", p->file_name,
+                    opening.line, opening.col, token_names[LEFT_SQUARE],
+                    token_names[opening.type]);
+        } else {
+            fprintf(stderr, "%zu:%zu: Expected %s, got %s\n", opening.line,
+                    opening.col, token_names[LEFT_SQUARE],
+                    token_names[opening.type]);
+        }
         *error = 1;
         return array;
     }
 
-    while (true) {
-        JSONElement value = parse_element(a, p, error);
-        if (*error != 0)
-            return array;
+    // Try parsing closing right square
+    // This is a special case for empty arrays
+    JSONToken closing = p->tokens[p->current_token];
+    if (closing.type == RIGHT_SQUARE) {
+        ++p->current_token;
+        return array;
+    }
 
-        if (size + 1 >= capacity) {
-            capacity *= 2;
-            JSONElement *new_elements =
-                arena_alloc(&tmp, sizeof(JSONElement) * capacity);
-            memcpy(new_elements, elements, sizeof(JSONElement) * size);
-            elements = new_elements;
+    while (true) {
+        JSONElement element = json_parse_element(a, p, error);
+        if (*error != 0) {
+            return array;
         }
 
-        elements[size] = value;
-        ++size;
+        JSONArrayElement *array_element =
+            arena_alloc(a, sizeof(JSONArrayElement));
+
+        *array_element = (JSONArrayElement){.element = element, .next = NULL};
+
+        if (array->head == NULL) {
+            array->head = array_element;
+            array->tail = array_element;
+        } else {
+            array->tail->next = array_element;
+            array->tail = array_element;
+        }
 
         JSONToken comma = p->tokens[p->current_token];
         ++p->current_token;
@@ -115,25 +188,15 @@ JSONArray *parse_array(Arena *a, JSONParser *p, int *error) {
             return array;
         }
 
-        if (comma.type == RIGHT_SQUARE)
-            break;
+        if (comma.type == RIGHT_SQUARE) break;
     }
 
-    array->elements_count = size;
-    array->elements = arena_alloc(a, sizeof(JSONElement) * size);
-    memcpy(array->elements, elements, sizeof(JSONElement) * size);
-
-    arena_free(&tmp);
     return array;
 }
 
-JSONObject *parse_object(Arena *a, JSONParser *p, int *error) {
+JSONObject *json_parse_object(Arena *a, JSONParser *p, int *error) {
     JSONObject *object = arena_alloc(a, sizeof(JSONObject));
-
-    Arena tmp = {0};
-    size_t capacity = INIT_CAPACITY;
-    size_t size = 0;
-    JSONPair *pairs = arena_alloc(&tmp, sizeof(JSONPair) * capacity);
+    *object = (JSONObject){.head = NULL, .tail = NULL};
 
     // Parse opening left curly
     JSONToken opening = p->tokens[p->current_token];
@@ -142,6 +205,14 @@ JSONObject *parse_object(Arena *a, JSONParser *p, int *error) {
         fprintf(stderr, "Expected %s, got %s\n", token_names[LEFT_CURLY],
                 token_names[opening.type]);
         *error = 1;
+        return object;
+    }
+
+    // Try to parse the closing right curly
+    // This is a special case for empty objects
+    JSONToken closing = p->tokens[p->current_token];
+    if (closing.type == RIGHT_CURLY) {
+        ++p->current_token;
         return object;
     }
 
@@ -167,46 +238,42 @@ JSONObject *parse_object(Arena *a, JSONParser *p, int *error) {
         }
 
         // Parse value
-        JSONElement value = parse_element(a, p, error);
-        if (*error != 0)
+        JSONElement value = json_parse_element(a, p, error);
+        if (*error != 0) {
             return object;
-        JSONPair pair = {.key = key.value.string, .value = value};
-
-        if (size + 1 >= capacity) {
-            capacity *= 2;
-            JSONPair *new_pairs =
-                arena_alloc(&tmp, sizeof(JSONPair) * capacity);
-            memcpy(new_pairs, pairs, sizeof(JSONPair) * size);
-            pairs = new_pairs;
         }
 
-        pairs[size] = pair;
-        ++size;
+        // Add pair to object linked list
+        JSONPair *pair = arena_alloc(a, sizeof(JSONPair));
+        *pair = (JSONPair){.key = key.value.string, .value = value};
 
-        // Parse comma
+        if (object->head == NULL) {
+            object->head = pair;
+            object->tail = pair;
+        } else {
+            object->tail->next = pair;
+            object->tail = pair;
+        }
+        object->tail->next = NULL;
+
+        // Parse comma, or closing curly
         JSONToken comma = p->tokens[p->current_token];
         ++p->current_token;
 
-        if (comma.type != COMMA && comma.type != RIGHT_CURLY) {
+        if (comma.type == RIGHT_CURLY) break;
+
+        if (comma.type != COMMA) {
             fprintf(stderr, "Expected %s or %s, got %s\n", token_names[COMMA],
                     token_names[RIGHT_CURLY], token_names[comma.type]);
             *error = 1;
             return object;
         }
-
-        if (comma.type == RIGHT_CURLY)
-            break;
     }
 
-    object->pairs_count = size;
-    object->pairs = arena_alloc(a, sizeof(JSONPair) * size);
-    memcpy(object->pairs, pairs, sizeof(JSONPair) * size);
-
-    arena_free(&tmp);
     return object;
 }
 
-JSONElement parse_string(JSONParser *p, int *error) {
+JSONElement json_parse_string(JSONParser *p, int *error) {
     JSONElement element = {0};
     JSONToken string_token = p->tokens[p->current_token];
     ++p->current_token;
@@ -222,201 +289,174 @@ JSONElement parse_string(JSONParser *p, int *error) {
     return element;
 }
 
-JSONElement parse_number(JSONParser *p, int *error) {
+JSONElement json_parse_number(JSONParser *p, int *error) {
     JSONToken number_token = p->tokens[p->current_token];
     JSONElement element = {.type = JSON_ELEMENT_VALUE};
 
     ++p->current_token;
 
     switch (number_token.type) {
-    case NUMBER_INT:
-        element.element.value.type = JSON_VALUE_NUMBER_INT;
-        element.element.value.value.number_int = number_token.value.number_int;
-        break;
-    case NUMBER_FLOAT:
-        element.element.value.type = JSON_VALUE_NUMBER_FLOAT;
-        element.element.value.value.number_float =
-            number_token.value.number_float;
-        break;
-    default:
-        fprintf(stderr, "Expected number, got %s\n",
-                token_names[number_token.type]);
-        *error = 1;
-        return element;
+        case NUMBER_INT:
+            element.element.value.type = JSON_VALUE_NUMBER_INT;
+            element.element.value.value.number_int =
+                number_token.value.number_int;
+            break;
+        case NUMBER_FLOAT:
+            element.element.value.type = JSON_VALUE_NUMBER_FLOAT;
+            element.element.value.value.number_float =
+                number_token.value.number_float;
+            break;
+        default:
+            fprintf(stderr, "Expected number, got %s\n",
+                    token_names[number_token.type]);
+            *error = 1;
+            return element;
     }
 
     return element;
 }
 
-JSONElement parse_true(JSONParser *p, int *error) {
-    JSONToken token = p->tokens[p->current_token];
-    JSONElement element = {0};
-    ++p->current_token;
-    if (token.type != TRUE) {
-        fprintf(stderr, "Expected true, got %s\n", token_names[token.type]);
-        *error = 1;
-        return element;
-    }
-    element.type = JSON_ELEMENT_VALUE;
-    element.element.value.type = JSON_VALUE_BOOLEAN;
-    element.element.value.value.boolean = true;
-    return element;
-}
-
-JSONElement parse_false(JSONParser *p, int *error) {
-    JSONToken token = p->tokens[p->current_token];
-    JSONElement element = {0};
-    ++p->current_token;
-    if (token.type != FALSE) {
-        fprintf(stderr, "Expected false, got %s\n", token_names[token.type]);
-        *error = 1;
-        return element;
-    }
-    element.type = JSON_ELEMENT_VALUE;
-    element.element.value.type = JSON_VALUE_BOOLEAN;
-    element.element.value.value.boolean = false;
-    return element;
-}
-
-JSONElement parse_null(JSONParser *p, int *error) {
-    JSONToken token = p->tokens[p->current_token];
-    JSONElement element = {0};
-    ++p->current_token;
-    if (token.type != NULL_TOKEN) {
-        fprintf(stderr, "Expected null, got %s\n", token_names[token.type]);
-        *error = 0;
-        return element;
-    }
-    element.type = JSON_ELEMENT_VALUE;
-    element.element.value.type = JSON_VALUE_NULL;
-    return element;
-}
-
-char *stringify(Arena *a, JSONElement element) {
-    // TODO: Use arenas here rather than calloc
+char *json_stringify(Arena *a, JSONElement element) {
     switch (element.type) {
-    case JSON_ELEMENT_OBJECT: {
-        size_t length = 1;
-        for (size_t i = 0; i < element.element.object->pairs_count; ++i) {
-            length += strlen(element.element.object->pairs[i].key) + 4;
-            length +=
-                strlen(stringify(a, element.element.object->pairs[i].value));
-            if (i != element.element.object->pairs_count - 1) {
-                length += 2;
+        case JSON_ELEMENT_OBJECT: {
+            // Calculate required buffer size
+            size_t length = 2;  // For {} characters
+            JSONPair *current = element.element.object->head;
+            bool first = true;
+
+            // Calculate length needed for the JSON string
+            while (current != NULL) {
+                if (!first) {
+                    length += 2;  // For ", " between pairs
+                }
+                // Key length + 2 for quotes + 2 for ": "
+                length += strlen(current->key) + 4;
+                // Value length
+                char *value_str = json_stringify(a, current->value);
+                length += strlen(value_str);
+
+                first = false;
+                current = current->next;
             }
-        }
-        char *buffer = calloc(1, sizeof(char) * length);
-        strcat(buffer, "{");
-        for (size_t i = 0; i < element.element.object->pairs_count; ++i) {
-            strcat(buffer, "\"");
-            strcat(buffer, element.element.object->pairs[i].key);
-            strcat(buffer, "\"");
-            strcat(buffer, ": ");
-            strcat(buffer,
-                   stringify(a, element.element.object->pairs[i].value));
-            if (i != element.element.object->pairs_count - 1) {
-                strcat(buffer, ", ");
+
+            // Allocate memory from arena
+            char *buffer =
+                arena_alloc(a, length + 1);  // +1 for null terminator
+
+            // Build JSON object string
+            buffer[0] = '{';
+            buffer[1] = '\0';
+
+            current = element.element.object->head;
+            first = true;
+
+            while (current != NULL) {
+                if (!first) {
+                    strcat(buffer, ", ");
+                }
+
+                // Add key with quotes
+                char *key_buf = arena_alloc(a, strlen(current->key) + 3);
+                snprintf(key_buf, strlen(current->key) + 3, "\"%s\"",
+                         current->key);
+                strcat(buffer, key_buf);
+
+                // Add colon separator
+                strcat(buffer, ": ");
+
+                // Add value
+                char *value_str = json_stringify(a, current->value);
+                strcat(buffer, value_str);
+
+                first = false;
+                current = current->next;
             }
-        }
-        strcat(buffer, "}");
-        return buffer;
-    }
-    case JSON_ELEMENT_ARRAY: {
-        size_t length = 1;
-        for (size_t i = 0; i < element.element.array->elements_count; ++i) {
-            length += strlen(stringify(a, element.element.array->elements[i]));
-            if (i != element.element.array->elements_count - 1) {
-                length += 2;
-            }
-        }
-        char *buffer = calloc(1, sizeof(char) * length);
-        strcat(buffer, "[");
-        for (size_t i = 0; i < element.element.array->elements_count; ++i) {
-            strcat(buffer, stringify(a, element.element.array->elements[i]));
-            if (i != element.element.array->elements_count - 1) {
-                strcat(buffer, ", ");
-            }
-        }
-        strcat(buffer, "]");
-        return buffer;
-    }
-    case JSON_ELEMENT_VALUE:
-        switch (element.element.value.type) {
-        case JSON_VALUE_STRING: {
-            size_t length = strlen(element.element.value.value.string) + 3;
-            char *buffer = calloc(1, sizeof(char) * length);
-            snprintf(buffer, length, "\"%s\"",
-                     element.element.value.value.string);
+
+            strcat(buffer, "}");
             return buffer;
         }
-        case JSON_VALUE_NUMBER_INT: {
-            char *buffer = calloc(1, sizeof(char) * 101);
-            snprintf(buffer, 100, "%llu",
-                     element.element.value.value.number_int);
-            return strdup(buffer);
-        }
-        case JSON_VALUE_NUMBER_FLOAT: {
-            char *buffer = calloc(1, sizeof(char) * 100);
-            snprintf(buffer, 100, "%Lf",
-                     element.element.value.value.number_float);
-            return strdup(buffer);
-        }
-        case JSON_VALUE_BOOLEAN:
-            if (element.element.value.value.boolean) {
-                return "true";
+        case JSON_ELEMENT_ARRAY: {
+            // Use the linked list structure instead of array access
+            size_t length = 2;  // For [] characters
+            JSONArrayElement *current = element.element.array->head;
+            bool first = true;
+
+            // Calculate length needed for the JSON string
+            while (current != NULL) {
+                if (!first) {
+                    length += 2;  // For ", " between elements
+                }
+                // Value length
+                char *elem_str = json_stringify(a, current->element);
+                length += strlen(elem_str);
+
+                first = false;
+                current = current->next;
             }
-            return "false";
-        case JSON_VALUE_NULL:
-            return "null";
+
+            // Allocate memory from arena
+            char *buffer =
+                arena_alloc(a, length + 1);  // +1 for null terminator
+
+            // Build JSON array string
+            buffer[0] = '[';
+            buffer[1] = '\0';
+
+            current = element.element.array->head;
+            first = true;
+
+            while (current != NULL) {
+                if (!first) {
+                    strcat(buffer, ", ");
+                }
+
+                // Add value
+                char *elem_str = json_stringify(a, current->element);
+                strcat(buffer, elem_str);
+
+                first = false;
+                current = current->next;
+            }
+
+            strcat(buffer, "]");
+            return buffer;
         }
-        break;
-    case JSON_ELEMENT_END:
-        return "";
+        case JSON_ELEMENT_VALUE:
+            switch (element.element.value.type) {
+                case JSON_VALUE_STRING: {
+                    size_t length = strlen(element.element.value.value.string) +
+                                    3;  // +2 for quotes, +1 for null
+                    char *buffer = arena_alloc(a, length);
+                    snprintf(buffer, length, "\"%s\"",
+                             element.element.value.value.string);
+                    return buffer;
+                }
+                case JSON_VALUE_NUMBER_INT: {
+                    char *buffer = arena_alloc(a, 32);  // Enough for int64
+                    snprintf(buffer, 32, "%lld",
+                             element.element.value.value.number_int);
+                    return buffer;
+                }
+                case JSON_VALUE_NUMBER_FLOAT: {
+                    char *buffer =
+                        arena_alloc(a, 64);  // Enough for long double
+                    snprintf(buffer, 64, "%Lf",
+                             element.element.value.value.number_float);
+                    return buffer;
+                }
+                case JSON_VALUE_BOOLEAN: {
+                    char *result = element.element.value.value.boolean
+                                       ? arena_alloc_str(a, "true")
+                                       : arena_alloc_str(a, "false");
+                    return result;
+                }
+                case JSON_VALUE_NULL: {
+                    return arena_alloc_str(a, "null");
+                }
+            }
+            break;
+        case JSON_ELEMENT_END:
+            return arena_alloc_str(a, "");
     }
     return NULL;
-}
-
-void print_element(JSONElement *element, int indent) {
-    switch (element->type) {
-    case JSON_ELEMENT_VALUE:
-        switch (element->element.value.type) {
-        case JSON_VALUE_STRING:
-            printf("%*c\"%s\"\n", indent, ' ',
-                   element->element.value.value.string);
-            break;
-        case JSON_VALUE_NUMBER_INT:
-            printf("%*c%llu\n", indent, ' ',
-                   element->element.value.value.number_int);
-            break;
-        case JSON_VALUE_NUMBER_FLOAT:
-            printf("%*c%Lf\n", indent, ' ',
-                   element->element.value.value.number_float);
-            break;
-        case JSON_VALUE_BOOLEAN:
-            printf("%*c%s\n", indent, ' ',
-                   element->element.value.value.boolean ? "true" : "false");
-            break;
-        case JSON_VALUE_NULL:
-            printf("%*cnull\n", indent, ' ');
-            break;
-        }
-        break;
-    case JSON_ELEMENT_ARRAY:
-        printf("%*c[\n", indent, ' ');
-        for (size_t i = 0; i < element->element.array->elements_count; ++i) {
-            print_element(&element->element.array->elements[i], indent + 4);
-        }
-        printf("%*c[\n", indent, ' ');
-        break;
-    case JSON_ELEMENT_OBJECT:
-        for (size_t i = 0; i < element->element.object->pairs_count; ++i) {
-            printf("%*c%s:\n", indent, ' ',
-                   element->element.object->pairs[i].key);
-            print_element(&element->element.object->pairs[i].value, indent + 4);
-        }
-        break;
-    case JSON_ELEMENT_END:
-        printf("End of JSON\n");
-        break;
-    }
 }

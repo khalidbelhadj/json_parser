@@ -6,7 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "../lib/c_utils/include/arena.h"
+#include "arena.h"
 
 #define INIT_CAPACITY (1 << 10)
 
@@ -27,19 +27,9 @@ typedef enum {
 } JSONTokenType;
 
 static const char *token_names[] = {
-    [0] = "{",
-    [1] = "}",
-    [2] = "[",
-    [3] = "]",
-    [4] = ",",
-    [5] = ":",
-    [6] = "int",
-    [7] = "float",
-    [8] = "string",
-    [9] = "true",
-    [10] = "false",
-    [11] = "null",
-    [12] = "eof",
+    [0] = "{",      [1] = "}",     [2] = "[",     [3] = "]",      [4] = ",",
+    [5] = ":",      [6] = "int",   [7] = "float", [8] = "string", [9] = "true",
+    [10] = "false", [11] = "null", [12] = "eof",
 };
 
 typedef struct {
@@ -62,11 +52,11 @@ typedef struct {
     const char *content;
     char *current_char;
     JSONToken current_token;
-} JSONTokeniser;
+} JSONTokenizer;
 
-JSONTokeniser *tokenise(Arena *a, const char *content);
-void tokenise_string(Arena *a, JSONTokeniser *t);
-void tokenise_true(JSONTokeniser *t);
-void tokenise_false(JSONTokeniser *t);
-void tokenise_null(JSONTokeniser *t);
-void tokenise_number(Arena *a, JSONTokeniser *t);
+JSONTokenizer *json_tokenize(Arena *a, const char *content, int *error);
+int json_tokenize_string(Arena *a, JSONTokenizer *t);
+int json_tokenize_true(JSONTokenizer *t);
+int json_tokenize_false(JSONTokenizer *t);
+int json_tokenize_null(JSONTokenizer *t);
+int json_tokenize_number(Arena *a, JSONTokenizer *t);

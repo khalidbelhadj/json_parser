@@ -1,6 +1,7 @@
+#include <time.h>
+
 #include "../include/parser.h"
-#include "../include/tokeniser.h"
-#include "../include/utils.h"
+#include "../include/tokenizer.h"
 
 // JSONElement *json_object_get(JSONObject *object, char *key) {
 //     for (size_t i = 0; i < object->pair_count; i++) {
@@ -28,13 +29,17 @@ int main(int argc, char *argv[]) {
 
     Arena a = {0};
     int error = 0;
-    JSONElement json = parse_file(&a, file_name, &error);
-    (void) json;
+
+    clock_t t;
+    t = clock();
+
+    JSONElement json = json_parse_file(&a, file_name, &error);
+    (void)json;
     if (error != 0) {
         return 1;
     }
-    // printf("%s\n", stringify(&a, json));
-    print_element(&json, 4);
-    arena_free(&a);
+
+    t = clock() - t;
+    printf("done %f\n", (double)t / CLOCKS_PER_SEC);
     return 0;
 }

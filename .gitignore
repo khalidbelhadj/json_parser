@@ -4,3 +4,7 @@
 .idea
 build/*
 main
+.cache
+.idea
+test/
+compile_commands.json
