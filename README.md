@@ -1,5 +1,2 @@
 # JSON Parser
-
-## Usage
-- To build the library, run `make`. Include the header files and link with `libjson` from the `build` directory.
-- An example of the usage of the library can be found in `example/`
+A simple C library for parsing JSON. This project is for educational purposes and is not intended for production use.
